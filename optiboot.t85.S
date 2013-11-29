@@ -1,0 +1,375 @@
+;sketchbook/hardware/tiny/bootloaders/optiboot/optiboot_attiny85.hex: file format ihex
+; Optiboot 4.4: SOFT_UART,LED_DATA_FLASH=3,VIRTUAL_BOOT_PARTITION,LED=2(PB2),TX=4(PB4),RX=3(PB3),DBAUD_RATE=9600,F_CPU=1MHz
+;------1------2-------3-------4-------5-------6-------7-------8-------9-------A-------B-------C-------D-------E-------F-------0
+.nolist
+#include <avr/io.h>
+.list
+.section .version
+optiboot_version: .word 0x0404 ; version 4.4
+.section .text ;.orig 0x1DC0
+Optiboot:
+; Adaboot nowait mod
+	eor	r1, r1		;Set R1 to 0x00: XOR R1: R1 <- 0x00. Just zero register, could be handy
+	in	r24, 0x34	;Store Control Register to R24: R24 <- MCUCR
+	out	0x34, r1	;Reset Control Register to 0x0: R01 -> MCUCR
+	sbrs	r24, 1		;Check EXTRF bit of MCUSR was set
+	rcall	appStart	; If ISC is off - we exit: appStart (0x1ff4) // Adaboot nowait end
+;Set GPIO pins
+#define LED	2
+#define PRX	3
+#define PTX	4
+	sbi	0x17, PTX	;Set IO Bit: Set DDB4 in DDRB: Pin PB4 to Output  - TX pin
+	sbi	0x18, PTX	;Set IO Bit: Set PORTB4 in PORTB: Pin PB4 to High - TX pin
+;Make friendly start blink - prepare timer for blink rate and wd for start timeout
+#if LED_START_FLASHES > 0
+	sbi	0x17, LED	;Set IO Bit: Set DDB2 in DDRB: Pin PB2 to Output - BLINK pin
+	ldi	r24, 0x0C	;Load 00001100 to R24
+	out	0x30, r24	;Set CSI3 and CSI2 in TCCR1 : Set prescaler to CK/128
+	ldi	r24, 0x0F	;Set WD Params: Load 00001111 to R24 : Set WDE(WDEnab), Prescale to 256K (2s)
+	rcall	watchdogConfig	; Call watchdogConfig
+#define BLINKS LED_START_FLASHES*2
+	ldi	r24, BLINKS	;Load number of blinks to R24 : Load number of start blinks to param
+flashLed:
+#if (F_CPU/(1024*16)) < 255
+#define TMRMND -(F_CPU/(1024*16))
+	ldi	r18, TMRMND	;Load timer remainder to R18 : -(F_CPU/(1024*16))
+#endif
+	ldi	r25, 0x04	;Load 0x04 to R25 (00000100)
+_lT1Blink:
+#ifdef TMRMND
+	out	0x2f, r18	;Set TCNT1 to R18
+#endif
+	out	0x38, r25	;Set TIFR to R25 : Clear timer flags and set Timer1 Overflow : Sync clocks 
+_lT1Wait:
+#if BLINKS > 6
+	sbis	0x16, PRX	; if RX Pin is Low
+	rjmp	initVars	;  data is pouring, go handle it
+#endif // If we're going to greet for a long time - do data checks so we won't skip some
+	in	r0, 0x38	; Read TIFR to R00
+	sbrs	r0, 2		; Skip if TOV1 is set
+	rjmp	_lT1Wait	;Loop while timer overflows
+	sbi	0x16, LED	;Set IO Bit: Set PINB2 of PINB: Toggle PB2 level - blink
+	wdr			;Reset Watchdog
+	subi	r24, 0x01	;Decrement R24
+	brne	_lT1Blink	;Until(Z) lT1Blink
+#endif
+
+#define ADD_L	r14
+#define ADD_H	r15
+initVars:
+	eor	ADD_L, ADD_L	;XOR R14 : LoadAddrH
+	eor	ADD_H, ADD_H	;XOR R15 : LoadAddrL
+	ldi	r21, 0x03	;Load 0x3 to R21 : SPMCSR bits PGERS & SPMEN
+	ldi	r20, 0x01	;Load 0x1 to R20 : SPMCSR bit SPMEN
+#ifndef BOOT_START
+#error BOOT_START must be defined to section start
+#define BOOT_START 0x1DC0
+#endif
+#define BOOT_SHIFT ( 0xFFF - ( 0x2000 - BOOT_START + 1 ) / 2 )
+#define RJMP_OPH ( BOOT_SHIFT / 0x100 + 0xC0 )
+#define RJMP_OPL ( BOOT_SHIFT % 0x100 )
+	ldi	r19, RJMP_OPL	;Prepare reset vector opcode to jump to optiboot. That is 0xC (1100) << 4
+	mov	r5, r19		;Move R19 -> R5  : and address shift. We jump from 0 so since address wraps
+	ldi	r19, RJMP_OPH	;Load MSB to R19 : the address shift will be FFF-<size of section in words+
+	mov	r4, r19		;Move R19 -> R4  : +1> - here +1 is to count actual rjmp instruction itself
+LoopMain:
+	rcall	getch		; r24=getch() : Read Command Byte
+_chkStkGetParam:
+	cpi	r24, 0x41	;Compare R24 with 0x41 (65, 'A' STK_GET_PARAM)
+	brne	_chkStkSetDev	;Goto next check if notZ (NotEqual)
+	rcall	getch		; r24=getch(): Read Parameter Byte
+	mov	r17, r24	;Store param to R17
+	rcall	verifySpace	; verifySpace
+	cpi	r17, 0x82	;Compare param with 0x82(130) - MINVER
+	breq	__sendMinVer	;If Z(Eq) GoTo sendMinVer
+	cpi	r17, 0x81	;Compare param with 0x81(129) - MAJVER
+	brne	__sendGenVer	;If notZ(Neq) Goto sendGenVer
+__sendMinVer:
+	ldi	r24, 0x04	;Load MinVer(4) to R24 for putch. Well, and MajVer as well
+	rjmp	__sendParam	;Goto sendParam
+__sendGenVer:
+	ldi	r24, 0x03	;Load GenVer(3) to R24 for putch - generic version reply
+__sendParam:
+	rcall	putch		; putch(r24) Send R24 over Tx
+	rjmp	endLoop		;Goto endLoop
+_chkStkSetDev:
+	cpi	r24, 0x42	;Compare R24 with 0x42(66, 'B', STK_SET_DEVICE)
+	brne	_chkStkSetDevExt;Goto next check if notZ (Neq)
+	ldi	r24, 0x14	;Load param to R24 (20) to skip next 20 chars
+	rjmp	__stkSkipInput	;Goto stkSkipInput // Ignore the data
+_chkStkSetDevExt:
+	cpi	r24, 0x45	;Compare R24 with 0x45 (69, STK_SET_DEVICE_EXT)
+	brne	_chkStkLoadAddr	;Goto next check if NotZ(Neq)
+	ldi	r24, 0x05	;Again load param to R24 (5) to skip next 5 chars
+__stkSkipInput:
+	rcall	getNch		; getNchar skip xR24 chars
+	rjmp	endLoop		;Goto EndLoop
+_chkStkLoadAddr:
+	cpi	r24, 0x55	;Compare R24 with 0x55 (85, U, STK_LOAD_ADDRESS)
+	brne	_chkStkUnivrsl	;Goto next check if notZ(Neq)
+	rcall	getch		; r24=getch()
+	mov	r10, r24	;Load ADDR_LOW to R10
+	rcall	getch		; r24=getch
+	mov	r11, r24	;Load ADDR_HIGH to R11
+	add	r10, r10	;Convert from word address to byte address (eg. *2)
+	adc	r11, r11	;same for high byte but with carry bit from previous operation
+	movw	ADD_L, r10	;Store resulting address bytes to R15:R14 from R11:R10
+	rjmp	_chkStkElse	;Goto chkStkElse for verifySpace
+_chkStkUnivrsl:
+	cpi	r24, 0x56	;Compare R24 with 0x56 (86, V, STK_UNIVERSAL)
+	brne	_chkStkProgPage	;Skip to next check if notZ(Neq)
+	ldi	r24, 0x04	;Load param to R24 (4) to skip next 4 chars
+	rcall	getNch		; getNch(r24) skip 4 bytes
+	ldi	r24, 0x00	;Load param to R24 (0) to reply 0 over Tx
+	rjmp	__sendParam	;Goto sendParam above to send the data
+_chkStkProgPage:
+	cpi	r24, 0x64	;Compare R24 with 0x64 (100, d, STK_PROG_PAGE)
+	breq	.+2		;Skip line if Z(Eq) to handle the input
+	rjmp	_chkStkReadPage	;Goto next check otherwise
+	rcall	getch		; getch() skip length MSB
+	rcall	getch		; r24=getch()
+	mov	r17, r24	;Store length LSB to R17
+	rcall	getch		; getch() skip MEMTYPE
+#ifndef RAMSTART
+#error RAMSTART Must be defined
+#define RAMSTART    0x0060
+#endif
+#define RAMSTH	(RAMSTART / 0x100)
+#define RAMSTL	(RAMSTART % 0x100)
+	ldi	r28, RAMSTL	;Initialize indirect memory pointer: YL
+	ldi	r29, RAMSTH	;And YH. Resulting buffer pointer is at RAMSTART
+__lReadPage:
+	rcall	getch		; r24=getch
+	st	Y+, r24		;Store received byte to (Y), increment pointer
+	cp	r17, r28	;compare length and YL
+	brne	__lReadPage	;Until(Z) lReadPage
+;__EndLoop
+	rcall	verifySpace	; verifySpace
+__boot_page_erase_short:
+	movw	r30, ADD_L	;Initialize Pointer Z: R31:R30 from R15:R14 - should keep LoadAddr
+	out	0x37, r21	;Set SPMCSR - (Store Program Memory Control/Status Register) to 00000011
+	spm			;Erase Program Memory at (Z) - (R31:R30) - LoadAddr
+__lSPMBusyWait:
+	in	r0, 0x37	;Load SPMCSR to R0
+	sbrc	r0, 0		;Skip if bit 0 (SPMEN) is 0
+	rjmp	__lSPMBusyWait	;Loop lSPMBusyWait Until SPM completes
+;__EndLoop
+	cp	ADD_L, r1	;Compare R14 (LoadAddrL) and R1 (zero)
+	cpc	ADD_H, r1	;Compare with zero and Carry with R15 (LoadAddrH) and if notZ(Neq) -
+	brne	__LoadPage	;Goto LoadPage. Otherwise (0x0000) patch first page saving reset vector
+__virtual_boot_partition:
+#ifndef WDT_VECT
+#error WDT_VECT Must be defined
+#define WDT_VECT    0x0C
+#endif
+#define WDT_SHFT    RAMSTART+WDT_VECT*2
+#define NEW_RSTV    RAMSTART+SPM_PAGESIZE*2+4
+#define NEW_WDVT    RAMSTART+SPM_PAGESIZE*2+6
+	lds	r25, RAMSTART	;Load *(RAMSTART) byte to R24 : Store first command (A reset vector opcode)
+	lds	r24, RAMSTART+1	; and next byte to R25 : to R25:R24. This is original ResetVector.
+	sts	NEW_RSTV+1, r24	;Store it to *(NEW_RSTV) Addresses should be divided by two (bytes to words)
+	sts	NEW_RSTV, r25	; and previous byte. Note: due to endiannes we reversed byte order.
+	lds	r8, WDT_SHFT	;Load *(WDT) - existing WatchdogVector to R8
+	lds	r9, WDT_SHFT+1	;  and MSB to R9 : R9:R8 <- (WDT_SHFT)
+	sts	NEW_WDVT+1, r9	; Store them to New WatchdogVector which is ResetVector+3
+	sts	NEW_WDVT, r8	;  and +2
+	sbiw	r24, WDT_VECT	; We reversed byte order so just decrease the rjmp opcode word by WDT
+	sts	WDT_VECT, r25	;  and store results in reversed order at Watchdog reset vector - low
+	sts	WDT_VECT+1, r24	;  and high bytes
+	sts	RAMSTART, r5	; Replace first command (i.e. 0x00 - reset vector) 
+	sts	RAMSTART+1, r4	; with rjmp optiboot opcode
+__LoadPage:
+	movw	r24, ADD_L	;Phew, Store R15:R14 (LoadAddr) to R25:R24
+	ldi	r26, RAMSTL	;Load RAMSTART LSB to R26 (XL)
+	ldi	r27, RAMSTH	;Load RAMSTART MSB to R27 (XH)
+__lFillPgPage:
+	ld	r6, X		;Load (R26:R27) - *X - to R6
+	adiw	r26, 0x01	;Increment Word R27:R26 (X+=1)
+	ld	r7, X		;Load *(R26:R27) - *(X) - to R7
+	sbiw	r26, 0x01	;Carefuly decrement word by 1 - X--
+	adiw	r26, 0x02	; and increment by 2: X+=2
+	movw	r30, r24	;Store R25:R24 (LoadAddr) to R31:R30 (Z)
+	movw	r0, r6		;Store R7:R6 (*Addr) to R1:R0 - instruction word
+	out	0x37, r20	;Set SPMCSR to R2(00000001) - clear all but set SPMEN
+	spm			;Start Program Memory (R1:R0 --> (Z))
+	eor	r1, r1		; CLR R1 : Return back our zero register to zero state
+	adiw	r24, 0x02	;R25:R24 += 2
+	ldi	r31, 0x01	;Load 1 to R31 (ZH)
+	cpi	r26, 0x40	;Compare 0x40 to R26 (XL)
+	cpc	r27, r31	; and R27 (XH) with R31 and Carry (1+C)
+	brne	__lFillPgPage	;Until(Z) lFillPgPage
+;__EndLoop
+	ldi	r18, 0x05	;Load 00000101 to R18
+	movw	r30, ADD_L	;Move R15:R14 to R31:R30 Reset Z to LoadAddr
+	out	0x37, r18	;Set SPMCSR to R18 - Clear all but set PGWRT,SPMEN
+	spm			;Write filled page from pg buffer to flash
+__lSpmBusyWait2:
+	in	r0, 0x37	;Read SPMCSR
+	sbrc	r0, 0		;Skip if SPMEN is clear
+	rjmp	__lSpmBusyWait2	;Until(Z) lSpmBusyWait2
+	rjmp	endLoop		;Goto EndLoop
+_chkStkReadPage:
+	cpi	r24, 0x74	;Compare R24 with 0x74 (116, t, STK_READ_PAGE)
+	brne	_chkStkReadSign	;else if notZ(Neq) Skip to next check
+	rcall	getch		; getch Skip byte
+	rcall	getch		; r24=getch() Read length
+	mov	r16, r24	;Store length to R16
+	rcall	getch		; getch Skip byte
+	rcall	verifySpace	; verifySpace 
+	movw	r28, ADD_L	;Load R29:R28 (Y) from R15:R14 (LoadAddr)
+	mov	r17, r16	;Copy length to R17 from R16
+__lReadAndSend:
+	sbiw	r28, 0x00	;Compare Word R29:R28 with 0x0000 (Y==0) - Original ResetVectorL
+	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
+	lds	r24, NEW_RSTV	; Load NewResetVectorL *(0x0184) to R24 - param for send.
+	rjmp	__StepAndSend	;Goto StepAndSend
+	cpi	r28, 0x01	;Compare R28 (YL) and 1
+	cpc	r29, r1		; and R29 (YH) with LoadAddrH and carry - Original ResetVectorH
+	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
+	lds	r24, NEW_RSTV+1	; Load NewResetVectorH to R24 - param for send
+	rjmp	__StepAndSend	;Goto StepAndSend
+	cpi	r28, WDT_VECT*2	;Compare R28 (YL) with 8 (i.e. 0x0004 - OriginalWdVectorL)
+	cpc	r29, r1		; and R29 (YH) with LoadAddrH
+	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
+	lds	r24, NEW_WDVT	; Load NewWdVectorL to R24 - param for send
+	rjmp	__StepAndSend	;Goto StepAndSend
+	cpi	r28, 0x09	;Compare R28 (YL) with 9 - Original WatchdogVectorH
+	cpc	r29, r1		; and R29 (YH) with R1 (LoadAddrH)
+	brne	.+6		;Skip 3 lines if notZ(Neq) - default case
+	lds	r24, NEW_WDVT+1	; Load NewWdVectorH to R24 - param for send
+	rjmp	__StepAndSend	;Goto StepAndSend
+	movw	r30, r28	;Set Z to Y
+	lpm	r24, Z+		;LoadProgMemory from Z++ to R24 - param for send
+__StepAndSend:
+	adiw	r28, 0x01	;Increment Y - R29:R28 += 1
+	rcall	putch		; putch(r24) Send R24 over Tx
+	subi	r17, 0x01	;Decrement R17 (length copy)
+	brne	__lReadAndSend	;Until(Z) lReadAndSend
+; STK_LOAD_ADDRESS must always be used prior to Cmnd_STK_PROG_PAGE or Cmnd_STK_READ_PAGE (2525B–AVR–04/03)
+#if 0
+;Increment load address to the page size we just read. R1 is zero, so just manipulate carry flag
+	sec			;Set Carry
+	adc	ADD_L, r1	;Increment R14 (by C) affecting C
+	adc	ADD_H, r1	;Add C to R15 - C from above line
+	subi	r16, 0x01	;Decrement R16
+	add	ADD_L, r16	;Add R16 to R14
+	adc	ADD_H, r1	;Add C to R15 - C from above line
+#endif
+	rjmp	endLoop		;Goto EndLoop
+_chkStkReadSign:
+	cpi	r24, 0x75	;Compare R24 with 0x74 (117, u, STK_READ_SIGN)
+	brne	_chkStkLvPgMode	;Skip to next check if notZ(Neq)
+	rcall	verifySpace	; verifySpace
+	ldi	r24, SIGNATURE_0;Load first signature octet: 0x1E(30)
+	rcall	putch		; putch(r24) and send it
+	ldi	r24, SIGNATURE_1;Load second signature octet: 0x93(147)
+	rcall	putch		; putch(r24) and send it
+	ldi	r24, SIGNATURE_2;Load third signature octet: 0x0B(11)
+	rjmp	__sendParam	; send param from above jumping to endLoop
+_chkStkLvPgMode:
+	cpi	r24, 0x51	;Compare R24 with 0x51 (81, Q, STK_LEAVE_PROG_MODE)
+	brne	_chkStkElse	;bail to default case if notZ(Neq)
+	ldi	r24, 0x08	;Load 00001000 to R24 param to reset WD prescaler
+	rcall	watchdogConfig	; watchdogConfig (r24)
+_chkStkElse:
+	rcall	verifySpace	; verifySpace
+endLoop:
+	ldi	r24, 0x10	;Load 0x10(16, STK_OK) to R24
+	rcall	putch		; putch(r24) Send param over Tx
+	rjmp	LoopMain	;Goto LoopMain
+
+verifySpace:
+	rcall	getch		; r24=getch()
+	cpi	r24, 0x20	;is SPACE (0x20 ' ')?
+	breq	.+2		;Skip line if Z(equal)
+	rjmp	.-2		; make somersault - endless loop: MCU will be reset by WD (in 2s)
+	ldi	r24, 0x14	;Load 0x14 to R24 : char to put (STK_INSYNC)
+	;rjmp	putch		;continue at putch(R24) and return with its ret back to main loop
+
+putch:
+	ldi	r18, 0x0A	;Load bitcount to R18: 10
+	com	r24		;Reverse R24
+	sec			;Set Carry C bit
+_lTx:
+	brcc	_raiseTx	;If Carry is 1 then Goto RaiseTx
+	cbi	0x18, 4		;Clear IO Bit: Clear PORTB4 of PORTB: Lower Tx
+	rjmp	_keepTx		;GoTo KeepTx
+_raiseTx:
+	sbi	0x18, 4		;Set IO Bit: Set PORTB4 of PORTB: Raise Tx
+	nop			;Align Low/High timing
+_keepTx:
+	rcall	uartDelay	; uartDelay
+	rcall	uartDelay	; uartDelay
+	rcall	uartDelay	; uartDelay
+	rcall	uartDelay	; uartDelay
+	lsr	r24		;Shift right R24 one bit, LSB to Carry
+	dec	r18		;Decrement R18 bitcounter
+	brne	_lTx		;Until(Z) LoopTx
+	ret 
+
+getch:
+	sbi	0x16, LED	;Set IO Bit: PINB2 of PINB: Toggle PIN PB2 : LED_FLASH
+	ldi	r19, 0x08	;Load bit counter to R20 : 8
+	ldi	r18, 0x00	;initialize return data
+_lWaitRx:
+	sbic	0x16, 3		;Skip if PINB3 of PINB is Clear: break if pin toggled
+	rjmp	_lWaitRx    	; Until Rx Start Edge LoopWaitRx
+	rcall	uartDelay	; uartDelay // Eat start bit
+_lRx:
+	rcall	uartDelay	; uartDelay // Position 
+	rcall	uartDelay	; uartDelay // to the bit
+	rcall	uartDelay	; uartDelay // far edge
+	rcall	uartDelay	; uartDelay // and feel the beat
+	clc			;Clear Carry C Bit
+	sbic	0x16, PRX	;Skip if PINB3 of PINB is Clear: Skip if data is 0
+	sec			;Set Carry C Bit
+	ror	r18		;Shift Right R18 through Carry: Fill in icoming bits
+	dec	r19		;Decrement bit counter
+	breq	_endlRx		;Break if Zero : Goto endlRx
+	rjmp	_lRx		;Loop for Rx Bits
+_endlRx:
+	wdr			;Reset Watchdog
+	rcall	uartDelay	; uartDelay
+	rcall	uartDelay	; uartDelay
+	rcall	uartDelay	; uartDelay
+	sbi	0x16, 2		;Set IO Bit: Set PINB2 of PINB: Toggle Pin PB2 : LED_FLASH
+	mov	r24, r18	;Move return data from R18 to R24
+	ret			;return with result in R24
+
+#define UART_B_VAL (((F_CPU/BAUD_RATE)-20)/6)
+#if UART_B_VAL > 255
+#error Baud rate too slow for soft UART
+#endif
+
+uartDelay:
+	ldi	r25, UART_B_VAL	;Calibrated Delay Loop: 67 times for ATt85/8MHz/IOSC
+_lUartDelay:
+	dec	r25		; Decrement R25
+	brne	_lUartDelay	;Until(Z) lUartDelay
+	ret
+
+getNch:
+	push	r17		;Stash R17 on stack
+	mov	r17, r24	;move R24 to R17
+_lGetNch:
+	rcall	getch		; r24=getch
+	subi	r17, 0x01	;Decrement R17
+	brne	_lGetNch	;Until(Z) lGetNch
+	rcall	verifySpace	; verifySpace
+	pop	r17		;Restore R17 from stack
+	ret
+
+watchdogConfig:
+	ldi	r25, 0x18	;Reset Watchdog
+	out	0x21, r25	;WDTCR <- 00011000
+	out	0x21, r24	;WDTCR <- R24
+	ret
+
+appStart:
+	ldi	r24, 0x00	; Set new WD flags (disable)
+	rcall	watchdogConfig	; Reset WD
+	ldi	r30, WDT_VECT	; Set ZL R30 <- WatchdogTimer Vector address
+	eor	r31, r31	; Set ZH R31 <- 0x00 (XOR R31): it's never above FF
+	ijmp			; Jump to WDT_VECT (to jump further to code)
+
+; vim: ts=8 noet:
