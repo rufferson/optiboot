@@ -154,6 +154,7 @@ __lSPMBusyWait:
 	sbrc	r0, 0		;Skip if bit 0 (SPMEN) is 0
 	rjmp	__lSPMBusyWait	;Loop lSPMBusyWait Until SPM completes
 ;__EndLoop
+#ifdef VIRTUAL_BOOT_PARTITION
 	cp	ADD_L, r1	;Compare R14 (LoadAddrL) and R1 (zero)
 	cpc	ADD_H, r1	;Compare with zero and Carry with R15 (LoadAddrH) and if notZ(Neq) -
 	brne	__LoadPage	;Goto LoadPage. Otherwise (0x0000) patch first page saving reset vector
@@ -178,6 +179,7 @@ __virtual_boot_partition:
 	sts	WDT_VECT+1, r24	;  and high bytes
 	sts	RAMSTART, r5	; Replace first command (i.e. 0x00 - reset vector) 
 	sts	RAMSTART+1, r4	; with rjmp optiboot opcode
+#endif // VIRTUAL_BOOT_PARTITION
 __LoadPage:
 	movw	r24, ADD_L	;Phew, Store R15:R14 (LoadAddr) to R25:R24
 	ldi	r26, RAMSTL	;Load RAMSTART LSB to R26 (XL)
@@ -192,13 +194,13 @@ __lFillPgPage:
 	movw	r0, r6		;Store R7:R6 (*Addr) to R1:R0 - instruction word
 	out	0x37, r20	;Set SPMCSR to R2(00000001) - clear all but set SPMEN
 	spm			;Start Program Memory (R1:R0 --> (Z))
-	eor	r1, r1		; CLR R1 : Return back our zero register to zero state
 	adiw	r24, 0x02	;R25:R24 += 2
 	ldi	r31, 0x01	;Load 1 to R31 (ZH)
-	cpi	r26, 0x40	;Compare 0x40 to R26 (XL)
+	cpi	r26, SPM_PAGESIZE;Compare 0x40 to R26 (XL)
 	cpc	r27, r31	; and R27 (XH) with R31 and Carry (1+C)
 	brne	__lFillPgPage	;Until(Z) lFillPgPage
 ;__EndLoop
+	eor	r1, r1		;CLR R1 : Return back our zero register to zero state
 	ldi	r18, 0x05	;Load 00000101 to R18
 	movw	r30, ADD_L	;Move R15:R14 to R31:R30 Reset Z to LoadAddr
 	out	0x37, r18	;Set SPMCSR to R18 - Clear all but set PGWRT,SPMEN
@@ -219,6 +221,7 @@ _chkStkReadPage:
 	movw	r28, ADD_L	;Load R29:R28 (Y) from R15:R14 (LoadAddr)
 	mov	r17, r16	;Copy length to R17 from R16
 __lReadAndSend:
+#ifdef VIRTUAL_BOOT_PARTITION
 	sbiw	r28, 0x00	;Compare Word R29:R28 with 0x0000 (Y==0) - Original ResetVectorL
 	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
 	lds	r24, NEW_RSTV	; Load NewResetVectorL *(0x0184) to R24 - param for send.
@@ -238,6 +241,7 @@ __lReadAndSend:
 	brne	.+6		;Skip 3 lines if notZ(Neq) - default case
 	lds	r24, NEW_WDVT+1	; Load NewWdVectorH to R24 - param for send
 	rjmp	__StepAndSend	;Goto StepAndSend
+#endif // VIRTUAL_BOOT_PARTITION
 	movw	r30, r28	;Set Z to Y
 	lpm	r24, Z+		;LoadProgMemory from Z++ to R24 - param for send
 __StepAndSend:
