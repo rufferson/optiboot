@@ -2,7 +2,14 @@
 ; Optiboot 4.4: SOFT_UART,LED_DATA_FLASH=3,VIRTUAL_BOOT_PARTITION,LED=2(PB2),TX=4(PB4),RX=3(PB3),DBAUD_RATE=9600,F_CPU=1MHz
 ;------1------2-------3-------4-------5-------6-------7-------8-------9-------A-------B-------C-------D-------E-------F-------0
 .nolist
+#define __SFR_OFFSET 0x0
 #include <avr/io.h>
+#if (F_CPU + BAUD_RATE * 4L) / (BAUD_RATE * 8L) - 1 > 250
+#error Unachievable baud rate (too slow) BAUD_RATE
+#endif // baud rate slow check
+#if (F_CPU + BAUD_RATE * 4L) / (BAUD_RATE * 8L) - 1 < 3
+#error Unachievable baud rate (too fast) BAUD_RATE
+#endif // baud rate fast check
 .list
 .section .version
 optiboot_version: .word 0x0404 ; version 4.4
@@ -10,49 +17,58 @@ optiboot_version: .word 0x0404 ; version 4.4
 Optiboot:
 ; Adaboot nowait mod
 	eor	r1, r1		;Set R1 to 0x00: XOR R1: R1 <- 0x00. Just zero register, could be handy
-	in	r24, 0x34	;Store Control Register to R24: R24 <- MCUCR
-	out	0x34, r1	;Reset Control Register to 0x0: R01 -> MCUCR
+	in	r24, MCUSR	;Store Control Register to R24: R24 <- MCUCR
+	out	MCUSR, r1	;Reset Control Register to 0x0: R01 -> MCUCR
 	sbrs	r24, 1		;Check EXTRF bit of MCUSR was set
 	rcall	appStart	; If ISC is off - we exit: appStart (0x1ff4) // Adaboot nowait end
 ;Set GPIO pins
 #define LED	2
 #define PRX	3
 #define PTX	4
-	sbi	0x17, PTX	;Set IO Bit: Set DDB4 in DDRB: Pin PB4 to Output  - TX pin
-	sbi	0x18, PTX	;Set IO Bit: Set PORTB4 in PORTB: Pin PB4 to High - TX pin
+	sbi	DDRB, PTX	;Set IO Bit: Set DDB4 in DDRB: Pin PB4 to Output  - TX pin
+	sbi	PORTB, PTX	;Set IO Bit: Set PORTB4 in PORTB: Pin PB4 to High - TX pin
 ;Make friendly start blink - prepare timer for blink rate and wd for start timeout
 #if LED_START_FLASHES > 0
-	sbi	0x17, LED	;Set IO Bit: Set DDB2 in DDRB: Pin PB2 to Output - BLINK pin
-	ldi	r24, 0x0C	;Load 00001100 to R24
-	out	0x30, r24	;Set CSI3 and CSI2 in TCCR1 : Set prescaler to CK/128
+	sbi	DDRB, LED	;Set IO Bit: Set DDB2 in DDRB: Pin PB2 to Output - BLINK pin
+#if F_CPU > 4000000L
+#define PSK1V 0x0D
+#define T1PSK 4096
+#else
+#define PSK1V 0x0C
+#define T1PSK 2048
+#endif // F_CPU
+	ldi	r24, PSK1V	;Load prescaler bits to R24 - T1 Prescale CK/T1PSK
+	out	TCCR1, r24	;Set TCCR1 - T1 prescaler from R24
 	ldi	r24, 0x0F	;Set WD Params: Load 00001111 to R24 : Set WDE(WDEnab), Prescale to 256K (2s)
 	rcall	watchdogConfig	; Call watchdogConfig
 #define BLINKS LED_START_FLASHES*2
 	ldi	r24, BLINKS	;Load number of blinks to R24 : Load number of start blinks to param
 flashLed:
-#if (F_CPU/(1024*16)) < 255
-#define TMRMND -(F_CPU/(1024*16))
+#if (F_CPU/T1PSK/4) < 128
+#define TMRMND -(F_CPU/T1PSK/4)
 	ldi	r18, TMRMND	;Load timer remainder to R18 : -(F_CPU/(1024*16))
 #endif
 	ldi	r25, 0x04	;Load 0x04 to R25 (00000100)
 _lT1Blink:
+	out	TIFR, r25	;Clear timer flags and set TOV1 Timer1 Overflow : Sync/reset clocks
 #ifdef TMRMND
-	out	0x2f, r18	;Set TCNT1 to R18
-#endif
-	out	0x38, r25	;Set TIFR to R25 : Clear timer flags and set Timer1 Overflow : Sync clocks 
+	out	TCNT1, r18	;Set TCNT1 to R18
+#else
+	nop			;We need to skip one cycle anyway for timer sync or we're screwd
+#endif // TMRMND
 _lT1Wait:
-#if BLINKS > 6
-	sbis	0x16, PRX	; if RX Pin is Low
+#if BLINKS > 6 // If we're going to greet for a long time - do rx checks so we won't skip some data
+	sbis	PINB, PRX	; if RX Pin is Low
 	rjmp	initVars	;  data is pouring, go handle it
-#endif // If we're going to greet for a long time - do data checks so we won't skip some
-	in	r0, 0x38	; Read TIFR to R00
-	sbrs	r0, 2		; Skip if TOV1 is set
+#endif // BLINKS > 6
+	in	r0, TIFR	; Read TIFR to R00
+	sbrs	r0, TOV1	; Skip if TOV1 is set
 	rjmp	_lT1Wait	;Loop while timer overflows
-	sbi	0x16, LED	;Set IO Bit: Set PINB2 of PINB: Toggle PB2 level - blink
 	wdr			;Reset Watchdog
-	subi	r24, 0x01	;Decrement R24
+	sbi	PINB, LED	;Set IO Bit: Set PINB2 of PINB: Toggle PB2 level - blink
+	dec	r24		;Decrement R24 loop counter
 	brne	_lT1Blink	;Until(Z) lT1Blink
-#endif
+#endif // LED_START_FLASHES > 0
 
 #define ADD_L	r14
 #define ADD_H	r15
@@ -296,10 +312,10 @@ putch:
 	sec			;Set Carry C bit
 _lTx:
 	brcc	_raiseTx	;If Carry is 1 then Goto RaiseTx
-	cbi	0x18, 4		;Clear IO Bit: Clear PORTB4 of PORTB: Lower Tx
+	cbi	PORTB, PTX	;Clear IO Bit: Clear PORTB4 of PORTB: Lower Tx
 	rjmp	_keepTx		;GoTo KeepTx
 _raiseTx:
-	sbi	0x18, 4		;Set IO Bit: Set PORTB4 of PORTB: Raise Tx
+	sbi	PORTB, PTX	;Set IO Bit: Set PORTB4 of PORTB: Raise Tx
 	nop			;Align Low/High timing
 _keepTx:
 	rcall	uartDelay	; uartDelay
@@ -312,11 +328,11 @@ _keepTx:
 	ret 
 
 getch:
-	sbi	0x16, LED	;Set IO Bit: PINB2 of PINB: Toggle PIN PB2 : LED_FLASH
+	sbi	PINB, LED	;Set IO Bit: PINB2 of PINB: Toggle PIN PB2 : LED_FLASH
 	ldi	r19, 0x08	;Load bit counter to R20 : 8
 	ldi	r18, 0x00	;initialize return data
 _lWaitRx:
-	sbic	0x16, 3		;Skip if PINB3 of PINB is Clear: break if pin toggled
+	sbic	PINB, PRX	;Skip if PINB3 of PINB is Clear: break if pin toggled
 	rjmp	_lWaitRx    	; Until Rx Start Edge LoopWaitRx
 	rcall	uartDelay	; uartDelay // Eat start bit
 _lRx:
@@ -325,7 +341,7 @@ _lRx:
 	rcall	uartDelay	; uartDelay // far edge
 	rcall	uartDelay	; uartDelay // and feel the beat
 	clc			;Clear Carry C Bit
-	sbic	0x16, PRX	;Skip if PINB3 of PINB is Clear: Skip if data is 0
+	sbic	PINB, PRX	;Skip if PINB3 of PINB is Clear: Skip if data is 0
 	sec			;Set Carry C Bit
 	ror	r18		;Shift Right R18 through Carry: Fill in icoming bits
 	dec	r19		;Decrement bit counter
@@ -336,17 +352,17 @@ _endlRx:
 	rcall	uartDelay	; uartDelay
 	rcall	uartDelay	; uartDelay
 	rcall	uartDelay	; uartDelay
-	sbi	0x16, 2		;Set IO Bit: Set PINB2 of PINB: Toggle Pin PB2 : LED_FLASH
+	sbi	PINB, LED	;Set IO Bit: Set PINB2 of PINB: Toggle Pin PB2 : LED_FLASH
 	mov	r24, r18	;Move return data from R18 to R24
 	ret			;return with result in R24
 
-#define UART_B_VAL (((F_CPU/BAUD_RATE)-20)/6)
+#define UART_B_VAL (((F_CPU/BAUD_RATE/2)-20)/6)+1
 #if UART_B_VAL > 255
 #error Baud rate too slow for soft UART
 #endif
 
 uartDelay:
-	ldi	r25, UART_B_VAL	;Calibrated Delay Loop: 67 times for ATt85/8MHz/IOSC
+	ldi	r25, UART_B_VAL	;Calibrated Delay Loop: 67 or 135? times for ATt85/8MHz/IOSC
 _lUartDelay:
 	dec	r25		; Decrement R25
 	brne	_lUartDelay	;Until(Z) lUartDelay
@@ -376,4 +392,4 @@ appStart:
 	eor	r31, r31	; Set ZH R31 <- 0x00 (XOR R31): it's never above FF
 	ijmp			; Jump to WDT_VECT (to jump further to code)
 
-; vim: ts=8 noet:
+; vim: ts=8 noet ft=aasm:

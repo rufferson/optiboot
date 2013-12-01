@@ -11,7 +11,7 @@ PGPORT=/dev/ttyUSB0
 PGRATE=19200
 #
 
-AVRDUDE=$(AVR_TOOLCHAIN_ROOT)/avrdude64 -C$(AVR_TOOLCHAIN_ROOT)/avrdude.conf -v -p$(TARGET) -c$(PRGMER) -P$(PGPORT) -b$(PGRATE)
+AVRDUDE=$(AVR_TOOLCHAIN_ROOT)/avrdude64 -C$(AVR_TOOLCHAIN_ROOT)/avrdude.conf -v -p$(TARGET) -P$(PGPORT)
 
 # gcc
 OBJCOPY = $(GCC_ROOT)/avr-objcopy
@@ -22,6 +22,7 @@ AS      = $(GCC_ROOT)/avr-as
 
 TARGET  = attiny85
 MCU_TARGET = $(TARGET)
+BAUD_RATE = 9600
 
 override CFLAGS  = -g -Wall $(OPTIMIZE) -mmcu=$(MCU_TARGET) $(DEFS)
 override LDFLAGS = -m$(TARGET) $(LDSECTIONS) -nostartfiles -nostdlib -Wl,-bihex
@@ -37,12 +38,11 @@ DEFS	 = -DBOOT_START=$(BOOT_START) -DRAMSTART=$(RAM_START) -DWDT_VECT=$(WDT_VECT
 attiny85: TARGET = attiny85
 attiny85: AVR_FREQ   = 8000000
 attiny85: FUSES		 = -e -Uefuse:w:0xFE:m -Uhfuse:w:0xD7:m -Ulfuse:w:0xE2:m
-attiny85: BAUD_RATE  = 9600
 attiny85: BOOT_START = 0x1DE0
 attiny85: RAM_START  = 0x0060
 attiny85: WDT_VECT   = 0x0C
 attiny85: CFLAGS    += '-DLED_START_FLASHES=80' '-DSOFT_UART' '-DVIRTUAL_BOOT_PARTITION'
-attiny85: CFLAGS	+= -Wa,--gstabs -Wa,-alhs=$(PROGRAM).lst
+attiny85: CFLAGS	+= -Wa,--gstabs -Wa,-alcms=$(PROGRAM).lst -Wa,-D -Wa,--warn
 attiny85: LDSECTIONS = -Wl,--section-start=.text=$(BOOT_START) -Wl,--section-start=.version=0x1ffe
 attiny85: $(PROGRAM).hex
 attiny85: $(PROGRAM).lst
@@ -51,8 +51,11 @@ install: $(PROGRAM).hex
 	cp $^ ~/sketchbook/hardware/tiny/bootloaders/optiboot/optiboot_attiny85.hex
 
 upload: $(PROGRAM).hex
-	$(AVRDUDE) $(FUSES)
-	$(AVRDUDE) -Uflash:w:$(PROGRAM).hex:i
+	$(AVRDUDE) -c$(PRGMER) -b$(PGRATE) $(FUSES)
+	$(AVRDUDE) -c$(PRGMER) -b$(PGRATE) -Uflash:w:$(PROGRAM).hex:i
+
+test: $(TARGET)
+	$(AVRDUDE) -carduino -b$(BAUD_RATE) -n -Uflash:r:dump.hex:i
 
 %.o: %.S
 	$(CC) $(CFLAGS) -c -o $@ $<
