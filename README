@@ -3,7 +3,7 @@ This is disassembled and reOPTImized optiboot version.
 Nothing special, just an attempt to learn AVR ASM flavour on a practical example.
 
 Achievements: 
-Reduced code size to 0x21a allowing to fit the loader to last 8 pages.
+Reduced code size to 0x1FE allowing to fit the loader to last 8 pages.
 Using T1 for led flashing
 
 Targets:
