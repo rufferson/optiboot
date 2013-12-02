@@ -182,6 +182,8 @@ __virtual_boot_partition:
 #define WDT_SHFT    RAMSTART+WDT_VECT*2
 #define NEW_RSTV    RAMSTART+SPM_PAGESIZE*2+4
 #define NEW_WDVT    RAMSTART+SPM_PAGESIZE*2+6
+#define PBENDH	(RAMSTART + SPM_PAGESIZE) / 0x100
+#define PBENDL	(RAMSTART + SPM_PAGESIZE) % 0x100
 	lds	r25, RAMSTART	;Load *(RAMSTART) byte to R24 : Store first command (A reset vector opcode)
 	lds	r24, RAMSTART+1	; and next byte to R25 : to R25:R24. This is original ResetVector.
 	sts	NEW_RSTV+1, r24	;Store it to *(NEW_RSTV) Addresses should be divided by two (bytes to words)
@@ -201,18 +203,15 @@ __LoadPage:
 	ldi	r26, RAMSTL	;Load RAMSTART LSB to R26 (XL)
 	ldi	r27, RAMSTH	;Load RAMSTART MSB to R27 (XH)
 __lFillPgPage:
-	ld	r6, X		;Load (R26:R27) - *X - to R6
-	adiw	r26, 0x01	;Increment Word R27:R26 (X+=1)
-	ld	r7, X		;Load *(R26:R27) - *(X) - to R7
-	sbiw	r26, 0x01	;Carefuly decrement word by 1 - X--
-	adiw	r26, 0x02	; and increment by 2: X+=2
+	ld	r6, X+		;Load (R26:R27) - *X - to R6 and increment X
+	ld	r7, X+		;Load *(R26:R27) - *(X) - to R7 and increment X
 	movw	r30, r24	;Store R25:R24 (LoadAddr) to R31:R30 (Z)
 	movw	r0, r6		;Store R7:R6 (*Addr) to R1:R0 - instruction word
 	out	0x37, r20	;Set SPMCSR to R2(00000001) - clear all but set SPMEN
 	spm			;Start Program Memory (R1:R0 --> (Z))
-	adiw	r24, 0x02	;R25:R24 += 2
-	ldi	r31, 0x01	;Load 1 to R31 (ZH)
-	cpi	r26, SPM_PAGESIZE;Compare 0x40 to R26 (XL)
+	adiw	r24, 0x02	;R25:R24 += 2 - Increment LoadAddr by word
+	ldi	r31, PBENDH	;Load buffer end msb to R31
+	cpi	r26, PBENDL	;Compare buffer end lsb to R26 (XL)
 	cpc	r27, r31	; and R27 (XH) with R31 and Carry (1+C)
 	brne	__lFillPgPage	;Until(Z) lFillPgPage
 ;__EndLoop
