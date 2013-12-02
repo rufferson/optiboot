@@ -158,7 +158,7 @@ _chkStkProgPage:
 __lReadPage:
 	rcall	getch		; r24=getch
 	st	Y+, r24		;Store received byte to (Y), increment pointer
-	cp	r17, r28	;compare length and YL
+	dec	r17		;decrease length
 	brne	__lReadPage	;Until(Z) lReadPage
 ;__EndLoop
 	rcall	verifySpace	; verifySpace
@@ -253,7 +253,7 @@ __lReadAndSend:
 	rjmp	__StepAndSend	;Goto StepAndSend
 	cpi	r28, WDT_VECT*2+1;Compare R28 (YL) original WatchdogVectorH
 	cpc	r29, r1		; and R29 (YH) with R1 (zero)
-	brne	.+8		;Skip 3 lines if notZ(Neq) - default case
+	brne	.+8		;Skip 4 lines if notZ(Neq) - default case
 	lds	r24, NEW_WDVT+1	; Load NewWdVectorH to R24 - param for send
 __StepAndSend:
 	adiw	r30, 0x01	; Step
