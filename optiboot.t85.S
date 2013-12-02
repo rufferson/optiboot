@@ -20,7 +20,8 @@ Optiboot:
 	in	r24, MCUSR	;Store Control Register to R24: R24 <- MCUCR
 	out	MCUSR, r1	;Reset Control Register to 0x0: R01 -> MCUCR
 	sbrs	r24, 1		;Check EXTRF bit of MCUSR was set
-	rcall	appStart	; If ISC is off - we exit: appStart (0x1ff4) // Adaboot nowait end
+	rcall	appStart	; If ISC is off - we exit: appStart()
+;Adaboot nowait end
 ;Set GPIO pins
 #define LED	2
 #define PRX	3
@@ -228,13 +229,12 @@ __lSpmBusyWait2:
 _chkStkReadPage:
 	cpi	r24, 0x74	;Compare R24 with 0x74 (116, t, STK_READ_PAGE)
 	brne	_chkStkReadSign	;else if notZ(Neq) Skip to next check
-	rcall	getch		; getch Skip byte
-	rcall	getch		; r24=getch() Read length
-	mov	r16, r24	;Store length to R16
-	rcall	getch		; getch Skip byte
-	rcall	verifySpace	; verifySpace 
-	movw	r28, ADD_L	;Load R29:R28 (Y) from R15:R14 (LoadAddr)
-	mov	r17, r16	;Copy length to R17 from R16
+	rcall	getch		; getch Skip byte - High (never sent)
+	rcall	getch		; r24=getch() Read length (must be <=FF)
+	mov	r17, r24	;Store length to R17
+	rcall	getch		; getch Skip byte - MemType
+	rcall	verifySpace	; verifySpace - sync
+	movw	r30, ADD_L	;Load Z from R15:R14 (LoadAddr)
 __lReadAndSend:
 #ifdef VIRTUAL_BOOT_PARTITION
 	sbiw	r28, 0x00	;Compare Word R29:R28 with 0x0000 (Y==0) - Original ResetVectorL
@@ -242,38 +242,29 @@ __lReadAndSend:
 	lds	r24, NEW_RSTV	; Load NewResetVectorL *(0x0184) to R24 - param for send.
 	rjmp	__StepAndSend	;Goto StepAndSend
 	cpi	r28, 0x01	;Compare R28 (YL) and 1
-	cpc	r29, r1		; and R29 (YH) with LoadAddrH and carry - Original ResetVectorH
+	cpc	r29, r1		; and R29 (YH) with zero and carry - Original ResetVectorH
 	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
 	lds	r24, NEW_RSTV+1	; Load NewResetVectorH to R24 - param for send
 	rjmp	__StepAndSend	;Goto StepAndSend
 	cpi	r28, WDT_VECT*2	;Compare R28 (YL) with 8 (i.e. 0x0004 - OriginalWdVectorL)
-	cpc	r29, r1		; and R29 (YH) with LoadAddrH
+	cpc	r29, r1		; and R29 (YH) with R1 (zero)
 	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
 	lds	r24, NEW_WDVT	; Load NewWdVectorL to R24 - param for send
 	rjmp	__StepAndSend	;Goto StepAndSend
-	cpi	r28, 0x09	;Compare R28 (YL) with 9 - Original WatchdogVectorH
-	cpc	r29, r1		; and R29 (YH) with R1 (LoadAddrH)
-	brne	.+6		;Skip 3 lines if notZ(Neq) - default case
+	cpi	r28, WDT_VECT*2+1;Compare R28 (YL) original WatchdogVectorH
+	cpc	r29, r1		; and R29 (YH) with R1 (zero)
+	brne	.+8		;Skip 3 lines if notZ(Neq) - default case
 	lds	r24, NEW_WDVT+1	; Load NewWdVectorH to R24 - param for send
-	rjmp	__StepAndSend	;Goto StepAndSend
-#endif // VIRTUAL_BOOT_PARTITION
-	movw	r30, r28	;Set Z to Y
-	lpm	r24, Z+		;LoadProgMemory from Z++ to R24 - param for send
 __StepAndSend:
-	adiw	r28, 0x01	;Increment Y - R29:R28 += 1
+	adiw	r30, 0x01	; Step
+	rjmp	__SendAndLoop	;Goto StepAndSend
+#endif // VIRTUAL_BOOT_PARTITION
+	lpm	r24, Z+		;LoadProgMemory from Z++ to R24 - param for send
+__SendAndLoop:
 	rcall	putch		; putch(r24) Send R24 over Tx
-	subi	r17, 0x01	;Decrement R17 (length copy)
+	dec	r17		;Decrement R17 (length)
 	brne	__lReadAndSend	;Until(Z) lReadAndSend
 ; STK_LOAD_ADDRESS must always be used prior to Cmnd_STK_PROG_PAGE or Cmnd_STK_READ_PAGE (2525B–AVR–04/03)
-#if 0
-;Increment load address to the page size we just read. R1 is zero, so just manipulate carry flag
-	sec			;Set Carry
-	adc	ADD_L, r1	;Increment R14 (by C) affecting C
-	adc	ADD_H, r1	;Add C to R15 - C from above line
-	subi	r16, 0x01	;Decrement R16
-	add	ADD_L, r16	;Add R16 to R14
-	adc	ADD_H, r1	;Add C to R15 - C from above line
-#endif
 	rjmp	endLoop		;Goto EndLoop
 _chkStkReadSign:
 	cpi	r24, 0x75	;Compare R24 with 0x74 (117, u, STK_READ_SIGN)
@@ -304,7 +295,6 @@ verifySpace:
 	rjmp	.-2		; make somersault - endless loop: MCU will be reset by WD (in 2s)
 	ldi	r24, 0x14	;Load 0x14 to R24 : char to put (STK_INSYNC)
 	;rjmp	putch		;continue at putch(R24) and return with its ret back to main loop
-
 putch:
 	ldi	r18, 0x0A	;Load bitcount to R18: 10
 	com	r24		;Reverse R24
@@ -319,8 +309,10 @@ _raiseTx:
 _keepTx:
 	rcall	uartDelay	; uartDelay
 	rcall	uartDelay	; uartDelay
+#ifdef HIGH_PRECISION
 	rcall	uartDelay	; uartDelay
 	rcall	uartDelay	; uartDelay
+#endif
 	lsr	r24		;Shift right R24 one bit, LSB to Carry
 	dec	r18		;Decrement R18 bitcounter
 	brne	_lTx		;Until(Z) LoopTx
@@ -335,8 +327,10 @@ _lWaitRx:
 	rjmp	_lWaitRx    	; Until Rx Start Edge LoopWaitRx
 	rcall	uartDelay	; uartDelay // Eat start bit
 _lRx:
+#ifdef HIGH_PRECISION
 	rcall	uartDelay	; uartDelay // Position 
 	rcall	uartDelay	; uartDelay // to the bit
+#endif
 	rcall	uartDelay	; uartDelay // far edge
 	rcall	uartDelay	; uartDelay // and feel the beat
 	clc			;Clear Carry C Bit
@@ -348,14 +342,20 @@ _lRx:
 	rjmp	_lRx		;Loop for Rx Bits
 _endlRx:
 	wdr			;Reset Watchdog
+#ifdef HIGH_PRECISION
 	rcall	uartDelay	; uartDelay
 	rcall	uartDelay	; uartDelay
 	rcall	uartDelay	; uartDelay
+#endif
 	sbi	PINB, LED	;Set IO Bit: Set PINB2 of PINB: Toggle Pin PB2 : LED_FLASH
 	mov	r24, r18	;Move return data from R18 to R24
 	ret			;return with result in R24
 
-#define UART_B_VAL (((F_CPU/BAUD_RATE/2)-20)/6)+1
+#ifdef HIGH_PRECISION
+#define UART_B_VAL (((F_CPU/BAUD_RATE/2)-20)/6)+1	// Old version delay - shorter, more precise, longer code
+#else
+#define UART_B_VAL (((F_CPU/BAUD_RATE)-20)/6)		// New version delay - longer, less precise, shorter code
+#endif
 #if UART_B_VAL > 255
 #error Baud rate too slow for soft UART
 #endif
@@ -368,14 +368,12 @@ _lUartDelay:
 	ret
 
 getNch:
-	push	r17		;Stash R17 on stack
-	mov	r17, r24	;move R24 to R17
+	mov	r16, r24	;move R24 to R17
 _lGetNch:
 	rcall	getch		; r24=getch
-	subi	r17, 0x01	;Decrement R17
+	subi	r16, 0x01	;Decrement R17
 	brne	_lGetNch	;Until(Z) lGetNch
 	rcall	verifySpace	; verifySpace
-	pop	r17		;Restore R17 from stack
 	ret
 
 watchdogConfig:
