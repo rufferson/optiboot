@@ -288,6 +288,23 @@ endLoop:
 	rcall	putch		; putch(r24) Send param over Tx
 	rjmp	LoopMain	;Goto LoopMain
 
+; AVR305 - http://www.atmel.com/Images/doc0952.pdf
+#ifdef HIGH_PRECISION
+#define UART_B_VAL (((F_CPU/BAUD_RATE/2)-20)/6)+1	// Old version delay - shorter, more precise, longer code
+#else
+#define UART_B_VAL (((F_CPU/BAUD_RATE)-20)/6)		// New version delay - longer, less precise, shorter code
+#endif
+#if UART_B_VAL > 255
+#error Baud rate too slow for soft UART
+#endif
+
+uartDelay:
+	ldi	r25, UART_B_VAL	;Calibrated Delay Loop: 67 or 135? times for ATt85/8MHz/IOSC
+_lUartDelay:
+	dec	r25		; Decrement R25
+	brne	_lUartDelay	;Until(Z) lUartDelay
+	ret
+
 verifySpace:
 	rcall	getch		; r24=getch()
 	cpi	r24, 0x20	;is SPACE (0x20 ' ')?
@@ -297,10 +314,10 @@ verifySpace:
 	;rjmp	putch		;continue at putch(R24) and return with its ret back to main loop
 putch:
 	ldi	r18, 0x0A	;Load bitcount to R18: 10
-	com	r24		;Reverse R24
-	sec			;Set Carry C bit
+	com	r24		;Invert R24
+	sec			;Set Carry C bit - start bit
 _lTx:
-	brcc	_raiseTx	;If Carry is 1 then Goto RaiseTx
+	brcc	_raiseTx	;If Carry is 0 then Goto RaiseTx
 	cbi	PORTB, PTX	;Clear IO Bit: Clear PORTB4 of PORTB: Lower Tx
 	rjmp	_keepTx		;GoTo KeepTx
 _raiseTx:
@@ -320,10 +337,10 @@ _keepTx:
 
 getch:
 	sbi	PINB, LED	;Set IO Bit: PINB2 of PINB: Toggle PIN PB2 : LED_FLASH
-	ldi	r19, 0x08	;Load bit counter to R20 : 8
-	ldi	r18, 0x00	;initialize return data
+	ldi	r19, 0x09	;Load bit counter to R20 : 8
+	eor	r24, r24	;initialize return data
 _lWaitRx:
-	sbic	PINB, PRX	;Skip if PINB3 of PINB is Clear: break if pin toggled
+	sbic	PINB, PRX	;Skip if PINB3 of PINB is Clear: break if RX is low
 	rjmp	_lWaitRx    	; Until Rx Start Edge LoopWaitRx
 	rcall	uartDelay	; uartDelay // Eat start bit
 _lRx:
@@ -336,36 +353,14 @@ _lRx:
 	clc			;Clear Carry C Bit
 	sbic	PINB, PRX	;Skip if PINB3 of PINB is Clear: Skip if data is 0
 	sec			;Set Carry C Bit
-	ror	r18		;Shift Right R18 through Carry: Fill in icoming bits
 	dec	r19		;Decrement bit counter
-	breq	_endlRx		;Break if Zero : Goto endlRx
+	breq	_endlRx		;Break if Zero : Should be on 9th stop bit
+	ror	r24		;Shift Right R18 through Carry: Fill in icoming bits
 	rjmp	_lRx		;Loop for Rx Bits
 _endlRx:
 	wdr			;Reset Watchdog
-#ifdef HIGH_PRECISION
-	rcall	uartDelay	; uartDelay
-	rcall	uartDelay	; uartDelay
-	rcall	uartDelay	; uartDelay
-#endif
 	sbi	PINB, LED	;Set IO Bit: Set PINB2 of PINB: Toggle Pin PB2 : LED_FLASH
-	mov	r24, r18	;Move return data from R18 to R24
 	ret			;return with result in R24
-
-#ifdef HIGH_PRECISION
-#define UART_B_VAL (((F_CPU/BAUD_RATE/2)-20)/6)+1	// Old version delay - shorter, more precise, longer code
-#else
-#define UART_B_VAL (((F_CPU/BAUD_RATE)-20)/6)		// New version delay - longer, less precise, shorter code
-#endif
-#if UART_B_VAL > 255
-#error Baud rate too slow for soft UART
-#endif
-
-uartDelay:
-	ldi	r25, UART_B_VAL	;Calibrated Delay Loop: 67 or 135? times for ATt85/8MHz/IOSC
-_lUartDelay:
-	dec	r25		; Decrement R25
-	brne	_lUartDelay	;Until(Z) lUartDelay
-	ret
 
 getNch:
 	mov	r16, r24	;move R24 to R17

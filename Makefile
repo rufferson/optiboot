@@ -35,14 +35,13 @@ DEFS	 = -DBOOT_START=$(BOOT_START) -DRAMSTART=$(RAM_START) -DWDT_VECT=$(WDT_VECT
 
 .PHONY: attiny85
 
-attiny85: TARGET = attiny85
-attiny85: AVR_FREQ   = 8000000
+attiny85: TARGET	 = attiny85
 attiny85: FUSES		 = -e -Uefuse:w:0xFE:m -Uhfuse:w:0xD7:m -Ulfuse:w:0xE2:m
-#attiny85: BOOT_START = 0x1DE0
+attiny85: AVR_FREQ	 = 8000000
 attiny85: BOOT_START = 0x1E00
-attiny85: RAM_START  = 0x0060
-attiny85: WDT_VECT   = 0x0C
-attiny85: CFLAGS    += '-DLED_START_FLASHES=80' '-DSOFT_UART' '-DVIRTUAL_BOOT_PARTITION'
+attiny85: RAM_START	 = 0x0060
+attiny85: WDT_VECT	 = 0x0C
+attiny85: CFLAGS	+= '-DLED_START_FLASHES=80' '-DSOFT_UART' '-DVIRTUAL_BOOT_PARTITION'
 attiny85: CFLAGS	+= -Wa,--gstabs -Wa,-alcms=$(PROGRAM).lst -Wa,-D -Wa,--warn
 attiny85: LDSECTIONS = -Wl,--section-start=.text=$(BOOT_START) -Wl,--section-start=.version=0x1ffe
 attiny85: $(PROGRAM).hex
