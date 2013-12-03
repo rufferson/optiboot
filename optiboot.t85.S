@@ -191,11 +191,11 @@ __virtual_boot_partition:
 	sts	NEW_RSTV, r25	; and previous byte. Note: due to endiannes we reversed byte order.
 	lds	r8, WDT_SHFT	;Load *(WDT) - existing WatchdogVector to R8
 	lds	r9, WDT_SHFT+1	;  and MSB to R9 : R9:R8 <- (WDT_SHFT)
-	sts	NEW_WDVT+1, r9	; Store them to New WatchdogVector which is ResetVector+3
+	sts	NEW_WDVT+1, r9	; Store them to New WatchdogVector which is NewResetVector+3
 	sts	NEW_WDVT, r8	;  and +2
 	sbiw	r24, WDT_VECT	; We reversed byte order so just decrease the rjmp opcode word by WDT
-	sts	WDT_VECT, r25	;  and store results in reversed order at Watchdog reset vector - low
-	sts	WDT_VECT+1, r24	;  and high bytes
+	sts	WDT_SHFT, r25	;  and store results in reversed order at Watchdog reset vector - low
+	sts	WDT_SHFT+1, r24	;  and high bytes
 	sts	RAMSTART, r5	; Replace first command (i.e. 0x00 - reset vector) 
 	sts	RAMSTART+1, r4	; with rjmp optiboot opcode
 #endif // VIRTUAL_BOOT_PARTITION
@@ -237,22 +237,22 @@ _chkStkReadPage:
 	movw	r30, ADD_L	;Load Z from R15:R14 (LoadAddr)
 __lReadAndSend:
 #ifdef VIRTUAL_BOOT_PARTITION
-	sbiw	r28, 0x00	;Compare Word R29:R28 with 0x0000 (Y==0) - Original ResetVectorL
+	sbiw	r30, 0x00	;Compare Word Z with 0x0000 (Z==0) - Original ResetVectorL
 	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
 	lds	r24, NEW_RSTV	; Load NewResetVectorL *(0x0184) to R24 - param for send.
 	rjmp	__StepAndSend	;Goto StepAndSend
-	cpi	r28, 0x01	;Compare R28 (YL) and 1
-	cpc	r29, r1		; and R29 (YH) with zero and carry - Original ResetVectorH
+	cpi	r30, 0x01	;Compare R30 (ZL) and 1
+	cpc	r31, r1		; and R31 (ZH) with zero and carry - Original ResetVectorH
 	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
 	lds	r24, NEW_RSTV+1	; Load NewResetVectorH to R24 - param for send
 	rjmp	__StepAndSend	;Goto StepAndSend
-	cpi	r28, WDT_VECT*2	;Compare R28 (YL) with 8 (i.e. 0x0004 - OriginalWdVectorL)
-	cpc	r29, r1		; and R29 (YH) with R1 (zero)
+	cpi	r30, WDT_VECT*2	;Compare R30 (ZL) with 2x OriginalWdVectorL
+	cpc	r31, r1		; and R31 (ZH) with R1 (zero)
 	brne	.+6		;Skip 3 lines if notZ(Neq) - next address condition
 	lds	r24, NEW_WDVT	; Load NewWdVectorL to R24 - param for send
 	rjmp	__StepAndSend	;Goto StepAndSend
-	cpi	r28, WDT_VECT*2+1;Compare R28 (YL) original WatchdogVectorH
-	cpc	r29, r1		; and R29 (YH) with R1 (zero)
+	cpi	r30, WDT_VECT*2+1;Compare R30 (ZL) original WatchdogVectorH
+	cpc	r31, r1		; and R31 (ZH) with R1 (zero)
 	brne	.+8		;Skip 4 lines if notZ(Neq) - default case
 	lds	r24, NEW_WDVT+1	; Load NewWdVectorH to R24 - param for send
 __StepAndSend:
