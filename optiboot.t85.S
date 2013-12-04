@@ -289,7 +289,7 @@ endLoop:
 	rjmp	LoopMain	;Goto LoopMain
 
 ; AVR305 - http://www.atmel.com/Images/doc0952.pdf
-#ifdef HIGH_PRECISION
+#ifdef HIGH_PRECISION // I'd counter my _precision_ statement though, no one counted call/ret overhead here
 #define UART_B_VAL (((F_CPU/BAUD_RATE/2)-20)/6)+1	// Old version delay - shorter, more precise, longer code
 #else
 #define UART_B_VAL (((F_CPU/BAUD_RATE)-20)/6)		// New version delay - longer, less precise, shorter code
@@ -336,12 +336,12 @@ _keepTx:
 	ret 
 
 getch:
-	sbi	PINB, LED	;Set IO Bit: PINB2 of PINB: Toggle PIN PB2 : LED_FLASH
-	ldi	r19, 0x09	;Load bit counter to R20 : 8
+	sbi	PINB, LED	;Set IO Bit: PINled of PINB: Toggle LED - turn on
+	ldi	r19, 0x09	;Load bit counter to R19 : 8+1stop
 	eor	r24, r24	;initialize return data
 _lWaitRx:
-	sbic	PINB, PRX	;Skip if PINB3 of PINB is Clear: break if RX is low
-	rjmp	_lWaitRx    	; Until Rx Start Edge LoopWaitRx
+	sbic	PINB, PRX	;Skip if PINrx of PINB is Clear: break if RX is low
+	rjmp	_lWaitRx    	; Until Rx Start Bit lWaitRx
 	rcall	uartDelay	; uartDelay // Eat start bit
 _lRx:
 #ifdef HIGH_PRECISION
@@ -351,19 +351,19 @@ _lRx:
 	rcall	uartDelay	; uartDelay // far edge
 	rcall	uartDelay	; uartDelay // and feel the beat
 	clc			;Clear Carry C Bit
-	sbic	PINB, PRX	;Skip if PINB3 of PINB is Clear: Skip if data is 0
-	sec			;Set Carry C Bit
+	sbic	PINB, PRX	;Skip if PINrx of PINB is Clear: Skip if data is 0
+	sec			;Set Carry C Bit otherwise
 	dec	r19		;Decrement bit counter
-	breq	_endlRx		;Break if Zero : Should be on 9th stop bit
-	ror	r24		;Shift Right R18 through Carry: Fill in icoming bits
-	rjmp	_lRx		;Loop for Rx Bits
+	breq	_endlRx		;Break if Zero : Should be on 9th stop bit to break
+	ror	r24		;Shift Right R24 through Carry: Fill in incoming bits
+	rjmp	_lRx		;Loop for next Rx Bit
 _endlRx:
 	wdr			;Reset Watchdog
-	sbi	PINB, LED	;Set IO Bit: Set PINB2 of PINB: Toggle Pin PB2 : LED_FLASH
+	sbi	PINB, LED	;Set IO Bit: Set PINled of PINB: Toggle LED - turn off
 	ret			;return with result in R24
 
 getNch:
-	mov	r16, r24	;move R24 to R17
+	mov	r16, r24	;move R24 to R16
 _lGetNch:
 	rcall	getch		; r24=getch
 	subi	r16, 0x01	;Decrement R17
@@ -373,8 +373,8 @@ _lGetNch:
 
 watchdogConfig:
 	ldi	r25, 0x18	;Reset Watchdog
-	out	0x21, r25	;WDTCR <- 00011000
-	out	0x21, r24	;WDTCR <- R24
+	out	WDTCR, r25	;WDTCR <- 00011000
+	out	WDTCR, r24	;WDTCR <- R24
 	ret
 
 appStart:
