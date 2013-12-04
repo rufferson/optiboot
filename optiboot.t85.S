@@ -185,17 +185,17 @@ __virtual_boot_partition:
 #define NEW_WDVT    RAMSTART+SPM_PAGESIZE*2+6
 #define PBENDH	(RAMSTART + SPM_PAGESIZE) / 0x100
 #define PBENDL	(RAMSTART + SPM_PAGESIZE) % 0x100
-	lds	r25, RAMSTART	;Load *(RAMSTART) byte to R24 : Store first command (A reset vector opcode)
-	lds	r24, RAMSTART+1	; and next byte to R25 : to R25:R24. This is original ResetVector.
-	sts	NEW_RSTV+1, r24	;Store it to *(NEW_RSTV) Addresses should be divided by two (bytes to words)
-	sts	NEW_RSTV, r25	; and previous byte. Note: due to endiannes we reversed byte order.
+	lds	r24, RAMSTART	;Load *(RAMSTART) byte to R24 : Store first command (A reset vector opcode)
+	lds	r25, RAMSTART+1	; and next byte to R25 : to R25:R24. This is original ResetVector.
+	sts	NEW_RSTV+1, r25	;Store it to *(NEW_RSTV) Addresses should be divided by two (bytes to words)
+	sts	NEW_RSTV, r24	; and previous byte.
 	lds	r8, WDT_SHFT	;Load *(WDT) - existing WatchdogVector to R8
 	lds	r9, WDT_SHFT+1	;  and MSB to R9 : R9:R8 <- (WDT_SHFT)
 	sts	NEW_WDVT+1, r9	; Store them to New WatchdogVector which is NewResetVector+3
 	sts	NEW_WDVT, r8	;  and +2
-	sbiw	r24, WDT_VECT	; We reversed byte order so just decrease the rjmp opcode word by WDT
-	sts	WDT_SHFT, r25	;  and store results in reversed order at Watchdog reset vector - low
-	sts	WDT_SHFT+1, r24	;  and high bytes
+	sbiw	r24, WDT_VECT	; Just decrease the rjmp opcode word by WDT - it shouldn't be above 0x40
+	sts	WDT_SHFT, r24	;  and store results at Watchdog reset vector - low
+	sts	WDT_SHFT+1, r25	;  and high bytes
 	sts	RAMSTART, r5	; Replace first command (i.e. 0x00 - reset vector) 
 	sts	RAMSTART+1, r4	; with rjmp optiboot opcode
 #endif // VIRTUAL_BOOT_PARTITION
