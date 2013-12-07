@@ -32,11 +32,11 @@ Optiboot:
 #if LED_START_FLASHES > 0
 	sbi	DDRB, LED	;Set IO Bit: Set DDB2 in DDRB: Pin PB2 to Output - BLINK pin
 #if F_CPU > 4000000L
-#define PSK1V 0x0D
-#define T1PSK 4096
-#else
 #define PSK1V 0x0C
 #define T1PSK 2048
+#else
+#define PSK1V 0x0B
+#define T1PSK 1024
 #endif // F_CPU
 	ldi	r24, PSK1V	;Load prescaler bits to R24 - T1 Prescale CK/T1PSK
 	out	TCCR1, r24	;Set TCCR1 - T1 prescaler from R24
@@ -164,10 +164,10 @@ __lReadPage:
 	rcall	verifySpace	; verifySpace
 __boot_page_erase_short:
 	movw	r30, ADD_L	;Initialize Pointer Z: R31:R30 from R15:R14 - should keep LoadAddr
-	out	0x37, r21	;Set SPMCSR - (Store Program Memory Control/Status Register) to 00000011
+	out	SPMCSR, r21	;Set SPMCSR - (Store Program Memory Control/Status Register) to 00000011
 	spm			;Erase Program Memory at (Z) - (R31:R30) - LoadAddr
 __lSPMBusyWait:
-	in	r0, 0x37	;Load SPMCSR to R0
+	in	r0, SPMCSR	;Load SPMCSR to R0
 	sbrc	r0, 0		;Skip if bit 0 (SPMEN) is 0
 	rjmp	__lSPMBusyWait	;Loop lSPMBusyWait Until SPM completes
 ;__EndLoop
@@ -208,7 +208,7 @@ __lFillPgPage:
 	ld	r7, X+		;Load *(R26:R27) - *(X) - to R7 and increment X
 	movw	r30, r24	;Store R25:R24 (LoadAddr) to R31:R30 (Z)
 	movw	r0, r6		;Store R7:R6 (*Addr) to R1:R0 - instruction word
-	out	0x37, r20	;Set SPMCSR to R2(00000001) - clear all but set SPMEN
+	out	SPMCSR, r20	;Set SPMCSR to R2(00000001) - clear all but set SPMEN
 	spm			;Start Program Memory (R1:R0 --> (Z))
 	adiw	r24, 0x02	;R25:R24 += 2 - Increment LoadAddr by word
 	ldi	r31, PBENDH	;Load buffer end msb to R31
@@ -219,10 +219,10 @@ __lFillPgPage:
 	eor	r1, r1		;CLR R1 : Return back our zero register to zero state
 	ldi	r18, 0x05	;Load 00000101 to R18
 	movw	r30, ADD_L	;Move R15:R14 to R31:R30 Reset Z to LoadAddr
-	out	0x37, r18	;Set SPMCSR to R18 - Clear all but set PGWRT,SPMEN
+	out	SPMCSR, r18	;Set SPMCSR to R18 - Clear all but set PGWRT,SPMEN
 	spm			;Write filled page from pg buffer to flash
 __lSpmBusyWait2:
-	in	r0, 0x37	;Read SPMCSR
+	in	r0, SPMCSR	;Read SPMCSR
 	sbrc	r0, 0		;Skip if SPMEN is clear
 	rjmp	__lSpmBusyWait2	;Until(Z) lSpmBusyWait2
 	rjmp	endLoop		;Goto EndLoop
