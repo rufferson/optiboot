@@ -82,7 +82,8 @@ initVars:
 #error BOOT_START must be defined to section start
 #define BOOT_START 0x1DC0
 #endif
-#define BOOT_SHIFT ( 0xFFF - ( 0x2000 - BOOT_START + 1 ) / 2 )
+#define PC_END ((( FLASHEND + 1 )/2) - 1) // Convert flashend from bytes to words - Address-space for PC
+#define BOOT_SHIFT ( PC_END - ( 0x2000 - BOOT_START + 1 ) / 2 )
 #define RJMP_OPH ( BOOT_SHIFT / 0x100 + 0xC0 )
 #define RJMP_OPL ( BOOT_SHIFT % 0x100 )
 	ldi	r19, RJMP_OPL	;Prepare reset vector opcode to jump to optiboot. That is 0xC (1100) << 4
