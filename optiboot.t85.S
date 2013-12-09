@@ -82,10 +82,10 @@ initVars:
 #error BOOT_START must be defined to section start
 #define BOOT_START 0x1DC0
 #endif
-#define PC_END ((( FLASHEND + 1 )/2) - 1) // Convert flashend from bytes to words - Address-space for PC
-#define BOOT_SHIFT ( PC_END - ( 0x2000 - BOOT_START + 1 ) / 2 )
-#define RJMP_OPH ( BOOT_SHIFT / 0x100 + 0xC0 )
-#define RJMP_OPL ( BOOT_SHIFT % 0x100 )
+#define PC_END ((( FLASHEND + 1 )/2) - 1) // Convert flashend from bytes to words - Pgm-space for PC
+#define BOOT_SHIFT ( PC_END - ( FLASHEND - BOOT_START )/2 - 1) // Get rjmp shift from RST to optiboot
+#define RJMP_OPH ( BOOT_SHIFT / 0x100 + 0xC0 )	// Build MSB - rjmp opcode and shift MSB
+#define RJMP_OPL ( BOOT_SHIFT % 0x100 )		// Opcode remainder - LSB of the shift
 	ldi	r19, RJMP_OPL	;Prepare reset vector opcode to jump to optiboot. That is 0xC (1100) << 4
 	mov	r5, r19		;Move R19 -> R5  : and address shift. We jump from 0 so since address wraps
 	ldi	r19, RJMP_OPH	;Load MSB to R19 : the address shift will be FFF-<size of section in words+
