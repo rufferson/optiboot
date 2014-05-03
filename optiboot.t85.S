@@ -16,11 +16,11 @@ optiboot_version: .word 0x0404 ; version 4.4
 .section .text ;.orig 0x1DC0
 Optiboot:
 ; Adaboot nowait mod
-	eor	r1, r1		;Set R1 to 0x00: XOR R1: R1 <- 0x00. Just zero register, could be handy
 	in	r24, MCUSR	;Store Control Register to R24: R24 <- MCUCR
-	out	MCUSR, r1	;Reset Control Register to 0x0: R01 -> MCUCR
 	sbrs	r24, 1		;Check EXTRF bit of MCUSR was set
 	rjmp	appStart	; If ISC is off - we exit: appStart()
+	eor	r1, r1		;Set R1 to 0x00: XOR R1: R1 <- 0x00. Just zero register, could be handy
+	out	MCUSR, r1	;Reset Control Register to 0x0: R01 -> MCUCR
 ;Adaboot nowait end
 ;Set GPIO pins
 #define LED	2
