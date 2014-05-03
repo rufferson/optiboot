@@ -20,7 +20,7 @@ Optiboot:
 	in	r24, MCUSR	;Store Control Register to R24: R24 <- MCUCR
 	out	MCUSR, r1	;Reset Control Register to 0x0: R01 -> MCUCR
 	sbrs	r24, 1		;Check EXTRF bit of MCUSR was set
-	rcall	appStart	; If ISC is off - we exit: appStart()
+	rjmp	appStart	; If ISC is off - we exit: appStart()
 ;Adaboot nowait end
 ;Set GPIO pins
 #define LED	2
@@ -28,9 +28,11 @@ Optiboot:
 #define PTX	4
 	sbi	DDRB, PTX	;Set IO Bit: Set DDB4 in DDRB: Pin PB4 to Output  - TX pin
 	sbi	PORTB, PTX	;Set IO Bit: Set PORTB4 in PORTB: Pin PB4 to High - TX pin
+	sbi	DDRB, LED	;Set IO Bit: Set DDB2 in DDRB: Pin PB2 to Output - BLINK pin
+	ldi	r24, 0x0F	;Set WD Params: Load 00001111 to R24 : Set WDE(WDEnab), Prescale to 256K (2s)
+	rcall	watchdogConfig	; Call watchdogConfig
 ;Make friendly start blink - prepare timer for blink rate and wd for start timeout
 #if LED_START_FLASHES > 0
-	sbi	DDRB, LED	;Set IO Bit: Set DDB2 in DDRB: Pin PB2 to Output - BLINK pin
 #if F_CPU > 4000000L
 #define PSK1V 0x0C
 #define T1PSK 2048
@@ -40,8 +42,6 @@ Optiboot:
 #endif // F_CPU
 	ldi	r24, PSK1V	;Load prescaler bits to R24 - T1 Prescale CK/T1PSK
 	out	TCCR1, r24	;Set TCCR1 - T1 prescaler from R24
-	ldi	r24, 0x0F	;Set WD Params: Load 00001111 to R24 : Set WDE(WDEnab), Prescale to 256K (2s)
-	rcall	watchdogConfig	; Call watchdogConfig
 #define BLINKS LED_START_FLASHES*2
 	ldi	r24, BLINKS	;Load number of blinks to R24 : Load number of start blinks to param
 flashLed:
