@@ -1,3 +1,74 @@
+/**********************************************************/
+/* Optiboot bootloader for Arduino / avrdude              */
+/*                                                        */
+/* https://github.com/rufferson/optiboot                  */
+/* Ruslan N. Marchenko <me@ruff.mobi>                     */
+/*                                                        */
+/* Heavily optimised bootloader that is faster and        */
+/* smaller than the Arduino standard bootloader.          */
+/*                                                        */
+/* This is re-optimised version for ATtinyX5 using        */
+/* dis- and re- assembled binary of the original code     */
+/* from http://optiboot.googlecode.com                    */
+/*                                                        */
+/* This program is free software; you can redistribute it */
+/* and/or modify it under the terms of the GNU General    */
+/* Public License as published by the Free Software       */
+/* Foundation; either version 2 of the License, or        */
+/* (at your option) any later version.                    */
+/*                                                        */
+/* This program is distributed in the hope that it will   */
+/* be useful, but WITHOUT ANY WARRANTY; without even the  */
+/* implied warranty of MERCHANTABILITY or FITNESS FOR A   */
+/* PARTICULAR PURPOSE.  See the GNU General Public        */
+/* License for more details.                              */
+/*                                                        */
+/* You should have received a copy of the GNU General     */
+/* Public License along with this program; if not, write  */
+/* to the Free Software Foundation, Inc.,                 */
+/* 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA */
+/*                                                        */
+/* Licence can be viewed at                               */
+/* http://www.fsf.org/licenses/gpl.txt                    */
+/*                                                        */
+/**********************************************************/
+
+/**********************************************************/
+/*                                                        */
+/* Mandatory and Optional defines:                        */
+/*                                                        */
+/**********************************************************/
+/* BOOT_START:                                            */
+/* Flash address at which to put bootloader code. Usually */
+/* last segment - code size should fit into one segment.  */
+/*                                                        */
+/* RAM_START:                                             */
+/* Address at which safe RAM starts - to use for buffer.  */
+/*                                                        */
+/* WDT_VECTOR:                                            */
+/* Address of the watchdog interrupt vector for this MCU. */
+/*                                                        */
+/* AVR_FREQ:                                              */
+/* Frequency in MHz MCU is going to run is used to        */
+/* calculate soft-uart delays for baud-rate.              */
+/*                                                        */
+/* BAUD_RATE:                                             */
+/* Set bootloader baud rate.                              */
+/*                                                        */
+/*    Optionals:                                          */
+/* LED_START_FLASHES:                                     */
+/* Number of LED flashes on bootup.                       */
+/*                                                        */
+/* LED_DATA_FLASH:                                        */
+/* Flash LED when transferring data. For boards without   */
+/* TX or RX LEDs, or for people who like blinky lights.   */
+/*                                                        */
+/* VIRTUAL_BOOT_PARTITION:                                */
+/* Emulate dedicated loader feature of the higher models  */
+/* by re-patching loaded code on-the-fly and rewiring     */
+/* interrupt vectors.                                     */
+/**********************************************************/
+
 ;sketchbook/hardware/tiny/bootloaders/optiboot/optiboot_attiny85.hex: file format ihex
 ; Optiboot 4.4: SOFT_UART,LED_DATA_FLASH=3,VIRTUAL_BOOT_PARTITION,LED=2(PB2),TX=4(PB4),RX=3(PB3),DBAUD_RATE=9600,F_CPU=1MHz
 ;------1------2-------3-------4-------5-------6-------7-------8-------9-------A-------B-------C-------D-------E-------F-------0
